@@ -6,8 +6,7 @@ import time
 import os
 import Surface
 from PyQt5.QtWidgets import QApplication, QMainWindow, QFileDialog, QMessageBox
-from PyQt5.QtCore import QBasicTimer, QStringListModel, QTimer, QThread, pyqtSignal
-from PyQt5.QtGui import QIcon
+from PyQt5.QtCore import QStringListModel, QThread, pyqtSignal
 
 
 def generate_logging():
@@ -56,7 +55,16 @@ class DataTransactionFlow:
         operator:操作员
         digest:摘要
     """
-    def __init__(self, name, account_number, date, transaction_code, debtor_sum, creditor_sum, balance, operator, digest):
+    def __init__(self,
+                 name,
+                 account_number,
+                 date,
+                 transaction_code,
+                 debtor_sum,
+                 creditor_sum,
+                 balance,
+                 operator,
+                 digest):
         self.name = name
         self.account_number = account_number
         self.date = date
@@ -97,7 +105,6 @@ class TransferClass:
         soup = BeautifulSoup(html_handler, features='lxml')
 
         self.table_assemble = soup.find_all('table')
-        print(type(self.table_assemble), self.table_assemble[0])
         # list_string = []
 
         # get the table node from the all html string
@@ -134,7 +141,7 @@ class TransferClass:
 
         # regular pattern
         pattern_number = re.compile(r'帐号：\[(\d+)\]')
-        pattern_name = re.compile(r'户名：\[\s*([\u4e00-\u9fa5]+)\s*\]')
+        pattern_name = re.compile(r'户名：\[\s*([\u4e00-\u9fa5]+\s*[\u4e00-\u9fa5]+)\s*\]')
         pattern_detail = re.compile(r'[0-9]{4}/[0-9]{2}/[0-9]{2}')
 
         # temporary variable
@@ -149,15 +156,15 @@ class TransferClass:
                 account_number = match_number[0]
                 name = pattern_name.findall(item)[0]
                 sign_dont_repeat = True
-                break
+                continue
 
             if sign_dont_repeat:
                 if pattern_detail.findall(item):
-                    transaction_flow = DataTransactionFlow(name, account_number, *item)
+                    transaction_flow = DataTransactionFlow(name, account_number, *item.split())
                     count += 1
                     # insert database
 
-        self.logger.info('账号:{0},户名:{1},流水条数:{2} 插入成功!', account_number, name, count)
+        self.logger.info('账号:{0},户名:{1},流水条数:{2} 插入成功!'.format(account_number, name, count))
 
         return [True, account_number, name, count]
 
@@ -188,13 +195,18 @@ class ThreadTransfer(QThread):
         for index in range(bill_length):
             return_data = transfer.process_data(index)
             if return_data[0]:
-                self.signOut.emit('账页账号:{0}, 户名:{1}, 账页信息条数:{2}'.format(return_data[1], return_data[2], return_data[3]), (index + 1) / bill_length * 100)
+                self.signOut.emit('账页账号:{0}, 户名:{1}, 账页信息条数:{2}'.format(return_data[1], return_data[2], return_data[3]),
+                                  (index + 1) / bill_length * 100)
             else:
                 self.signOut.emit('当前账页处理出现错误，请查看日志文件输出!')
+
+        # self.signOut.emit('当前文件账页读取完毕!', 100)
 
 
 class FunctionPage(QMainWindow, Surface.Ui_MainWindow):
     def __init__(self):
+        # 消除警告
+        # noinspection PyArgumentList
         QMainWindow.__init__(self)
         Surface.Ui_MainWindow.__init__(self)
         self.setupUi(self)
@@ -202,30 +214,60 @@ class FunctionPage(QMainWindow, Surface.Ui_MainWindow):
         self.message = []
         self.slm = QStringListModel()
 
-        self.workthread = None
+        self.work_thread = None
         self.step = 0  # 进度条的值
         self.progressBar_Progress.setValue(0)
         self.Button_SelectFile.clicked.connect(self.select_file)
         self.Button_Start.clicked.connect(self.start_process)
 
     def select_file(self):
-        filename_choose, file_type = QFileDialog.getOpenFileName(self, '打开', r'./', 'Html Files (*.htm);;All Files (*)')
+        # noinspection PyArgumentList
+        filename_choose, file_type = QFileDialog.getOpenFileName(None, '打开', r'./', 'Html Files (*.htm);;All Files (*)')
         self.lineEdit_SelectFile.setText(filename_choose)
 
     def start_process(self):
-        pass
+        if not self.lineEdit_SelectFile.text():
+            # noinspection PyArgumentList
+            QMessageBox.information(None, '提示', '请选择HTML文件!')
+        else:
+            pass
+        self.work_thread = ThreadTransfer(self.lineEdit_SelectFile.text())
+
+        self.work_thread.signOut.connect(self.list_add)
+        self.Button_Start.setEnabled(False)
+        self.Button_Start.setText('正在处理')
+        self.work_thread.start()
+
+    def set_progress_bar(self):
+        self.step += 1
+        self.progressBar_Progress.setValue(self.step)
+
+    def list_add(self, message, state):
+        self.message.append(message)
+        self.slm.setStringList(self.message)
+        self.listView_Info.setModel(self.slm)
+        self.listView_Info.scrollToBottom()
+        self.progressBar_Progress.setValue(state)
+        if state >= 100:
+            self.Button_Start.setEnabled(True)
+            self.Button_Start.setText('开始处理')
+            # noinspection PyArgumentList
+            QMessageBox.information(None, "提示", "程序处理完成")
 
 
 if __name__ == '__main__':
-    instance = TransferClass()
-    instance.read_data()
+    # instance = TransferClass()
+    # instance.read_data()
+    # i = instance.return_bill_length()
+    # for index in range(i):
+    #     instance.process_data(index)
     # print('账号：'.encode('utf8'))
     # string = '帐号：[920103010110001009]   户名：[    刘成福]'
     #
     # print(string.split())
-    # app = QApplication(sys.argv)
-    # # MainWindow = QMainWindow()
-    # ui = FunctionPage()
-    # # ui.setupUi(MainWindow)
-    # ui.show()
-    # sys.exit(app.exec_())
+    app = QApplication(sys.argv)
+    # MainWindow = QMainWindow()
+    ui = FunctionPage()
+    # ui.setupUi(MainWindow)
+    ui.show()
+    sys.exit(app.exec_())
